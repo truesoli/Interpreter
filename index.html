@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="통역">
+<meta name="theme-color" content="#0f1115">
+<title>실시간 통역</title>
+<style>
+  :root{
+    --bg:#f6f5f2; --card:#ffffff; --ink:#16181d; --muted:#6b6f78; --line:#e4e2dc;
+    --them:#2f6fed; --me:#e0662f; --ok:#1f9d55; --danger:#d23b3b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f1115; --card:#181b21; --ink:#eef0f3; --muted:#9097a3; --line:#272b33;
+      --them:#5b8cff; --me:#ff8a52; }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+  header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 8px}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.3px}
+  .icon-btn{background:none;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:6px 10px;font-size:14px}
+  .bar{display:flex;gap:8px;align-items:center;padding:0 16px 10px}
+  .bar label{font-size:13px;color:var(--muted)}
+  select,input{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;width:100%}
+  .pair{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;flex:1}
+  .arrow{color:var(--muted);font-size:14px}
+  .fixed{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;text-align:center}
+  #status{margin:0 16px 8px;font-size:13px;color:var(--muted);min-height:18px}
+  #status.live{color:var(--ok)}
+  #status.err{color:var(--danger)}
+  #log{flex:1;overflow-y:auto;padding:4px 16px 16px;display:flex;flex-direction:column;gap:10px}
+  .empty{color:var(--muted);text-align:center;margin-top:40px;font-size:14px;line-height:1.7}
+  .msg{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px;border-left:4px solid var(--them)}
+  .msg.me{border-left-color:var(--me)}
+  .msg .who{font-size:12px;color:var(--muted);margin-bottom:2px}
+  .msg .src{font-size:14px;color:var(--muted)}
+  .msg .dst{font-size:18px;font-weight:600;margin-top:4px}
+  .msg .dst.pending{color:var(--muted);font-weight:400;font-style:italic}
+  .msg button{margin-top:6px;background:none;border:none;color:var(--muted);font-size:13px;padding:0}
+  #interim{margin:0 16px 8px;font-size:15px;color:var(--muted);min-height:22px;font-style:italic}
+  .controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 16px 16px;border-top:1px solid var(--line);background:var(--bg)}
+  .big{border:none;border-radius:18px;padding:18px 10px;font-size:17px;font-weight:700;color:#fff;line-height:1.25}
+  .big small{display:block;font-size:12px;font-weight:500;opacity:.85;margin-top:2px}
+  .big.them{background:var(--them)}
+  .big.me{background:var(--me)}
+  .big.on{outline:4px solid var(--ok);outline-offset:2px}
+  .big:disabled{opacity:.45}
+  dialog{margin:auto;border:none;border-radius:18px;background:var(--card);color:var(--ink);width:min(92vw,440px);padding:20px}
+  dialog::backdrop{background:rgba(0,0,0,.45)}
+  dialog h2{font-size:18px;margin-bottom:12px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+  .hint{font-size:12px;color:var(--muted);margin-top:4px}
+  .row{display:flex;gap:8px;justify-content:flex-end}
+  .row button{border:none;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600}
+  .primary{background:var(--them);color:#fff}
+  .ghost{background:transparent;color:var(--ink);border:1px solid var(--line)!important}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎧 실시간 통역</h1>
+  <div style="display:flex;gap:6px">
+    <button class="icon-btn" id="clearBtn">지우기</button>
+    <button class="icon-btn" id="settingsBtn">설정</button>
+  </div>
+</header>
+
+<div class="bar">
+  <div class="pair">
+    <div class="fixed">한국어</div>
+    <div class="arrow">⇄</div>
+    <select id="target">
+      <option value="en-US">English</option>
+      <option value="ja-JP">日本語</option>
+      <option value="es-ES">Español</option>
+      <option value="zh-CN">中文</option>
+    </select>
+  </div>
+</div>
+
+<div id="status">에어팟을 연결하고 아래 버튼을 누르세요.</div>
+<div id="interim"></div>
+
+<main id="log">
+  <div class="empty" id="empty">
+    <b>상대 말 듣기</b> — 상대가 말하면 한국어로 에어팟에 들려줍니다.<br>
+    <b>내가 말하기</b> — 한국어로 말하면 상대 언어로 읽어줍니다.<br>
+    (내가 말하기 때는 에어팟을 빼거나 휴대폰 스피커로 전환하세요)
+  </div>
+</main>
+
+<div class="controls">
+  <button class="big them" id="themBtn">상대 말 듣기<small>계속 듣는 중 → 한국어</small></button>
+  <button class="big me" id="meBtn">내가 말하기<small>한국어 → <span id="tLabel">English</span></small></button>
+</div>
+
+<dialog id="settings">
+  <h2>설정</h2>
+  <div class="field">
+    <label for="apiKey">Claude API 키</label>
+    <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
+    <div class="hint">console.anthropic.com에서 발급. 이 휴대폰에만 저장됩니다.</div>
+  </div>
+  <div class="field">
+    <label for="rate">읽기 속도</label>
+    <input id="rate" type="range" min="0.7" max="1.4" step="0.05" value="1.05">
+  </div>
+  <div class="field">
+    <label for="koVoice">한국어 목소리</label>
+    <select id="koVoice"></select>
+  </div>
+  <div class="field">
+    <label for="tVoice">상대 언어 목소리</label>
+    <select id="tVoice"></select>
+    <div class="hint">iPhone 설정 → 손쉬운 사용 → 음성 콘텐츠 → 음성에서 '향상된' 목소리를 받으면 훨씬 자연스러워집니다.</div>
+  </div>
+  <div class="row">
+    <button class="ghost" id="cancelSet">닫기</button>
+    <button class="primary" id="saveSet">저장</button>
+  </div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const LANG_NAME = {"ko-KR":"Korean","en-US":"English","ja-JP":"Japanese","es-ES":"Spanish","zh-CN":"Mandarin Chinese"};
+const LABEL = {"en-US":"English","ja-JP":"日本語","es-ES":"Español","zh-CN":"中文"};
+const MODEL = "claude-haiku-5-5";
+
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : v; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+};
+
+let target = store.get("target", "en-US");
+let apiKey = store.get("apiKey", "");
+let rate = parseFloat(store.get("rate", "1.05"));
+let koVoiceName = store.get("koVoice", "");
+let tVoiceName = store.get("tVoice_" + target, "");
+
+$("#target").value = target;
+$("#tLabel").textContent = LABEL[target];
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, mode = null, speaking = false, wantListening = false;
+const queue = []; let busy = false;
+
+function setStatus(t, cls){ const s = $("#status"); s.textContent = t; s.className = cls || ""; }
+
+/* ---------- Speech recognition ---------- */
+function startListening(newMode){
+  if(!SR){ setStatus("이 브라우저는 음성 인식을 지원하지 않아요. iPhone Safari나 Chrome을 쓰세요.", "err"); return; }
+  if(!apiKey){ openSettings(); setStatus("먼저 설정에서 API 키를 넣어주세요.", "err"); return; }
+  stopListening();
+  mode = newMode; wantListening = true;
+  rec = new SR();
+  rec.lang = mode === "them" ? target : "ko-KR";
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.onresult = e => {
+    let interim = "";
+    for(let i = e.resultIndex; i < e.results.length; i++){
+      const r = e.results[i];
+      if(r.isFinal){ const text = r[0].transcript.trim(); if(text) enqueue(text, mode); }
+      else interim += r[0].transcript;
+    }
+    $("#interim").textContent = interim;
+  };
+  rec.onerror = e => {
+    if(e.error === "not-allowed" || e.error === "service-not-allowed"){
+      wantListening = false; setStatus("마이크 권한이 필요해요. 브라우저 설정에서 허용해주세요.", "err"); updateButtons();
+    }
+  };
+  rec.onend = () => {
+    // iOS ends recognition on silence; restart automatically unless we're talking or stopped
+    if(wantListening && !speaking){ try{ rec.start(); }catch(e){} }
+  };
+  try{ rec.start(); }catch(e){}
+  setStatus(mode === "them" ? `${LABEL[target]} 듣는 중… 상대가 말하면 한국어로 들려드려요` : "한국어로 말씀하세요…", "live");
+  updateButtons();
+}
+function stopListening(){
+  wantListening = false;
+  if(rec){ rec.onend = null; try{ rec.abort(); }catch(e){} rec = null; }
+  $("#interim").textContent = "";
+}
+function pauseForSpeech(){ speaking = true; if(rec){ try{ rec.stop(); }catch(e){} } }
+function resumeAfterSpeech(){
+  speaking = false;
+  if(wantListening && rec){ try{ rec.start(); }catch(e){} }
+}
+
+function updateButtons(){
+  $("#themBtn").classList.toggle("on", wantListening && mode === "them");
+  $("#meBtn").classList.toggle("on", wantListening && mode === "me");
+  $("#themBtn").firstChild.textContent = (wantListening && mode === "them") ? "듣기 멈추기" : "상대 말 듣기";
+  $("#meBtn").firstChild.textContent = (wantListening && mode === "me") ? "말하기 멈추기" : "내가 말하기";
+  if(!wantListening) setStatus("멈춤. 버튼을 눌러 다시 시작하세요.");
+}
+
+$("#themBtn").onclick = () => { unlockSpeech(); (wantListening && mode === "them") ? (stopListening(), updateButtons()) : startListening("them"); };
+$("#meBtn").onclick = () => { unlockSpeech(); (wantListening && mode === "me") ? (stopListening(), updateButtons()) : startListening("me"); };
+
+/* ---------- Translation queue ---------- */
+const history = []; // recent pairs for context
+function enqueue(text, who){
+  const el = addMsg(text, who);
+  queue.push({text, who, el});
+  pump();
+}
+async function pump(){
+  if(busy || !queue.length) return;
+  busy = true;
+  const item = queue.shift();
+  const from = item.who === "them" ? target : "ko-KR";
+  const to = item.who === "them" ? "ko-KR" : target;
+  try{
+    const out = await translate(item.text, from, to);
+    item.el.querySelector(".dst").textContent = out;
+    item.el.querySelector(".dst").classList.remove("pending");
+    item.el.dataset.out = out; item.el.dataset.lang = to;
+    history.push({who:item.who, src:item.text, dst:out}); if(history.length > 6) history.shift();
+    await speak(out, to);
+  }catch(err){
+    item.el.querySelector(".dst").textContent = "번역 실패: " + err.message;
+    setStatus("번역 오류 — API 키나 인터넷 연결을 확인하세요.", "err");
+  }
+  busy = false;
+  pump();
+}
+
+async function translate(text, from, to){
+  const ctx = history.map(h => `${h.who === "them" ? "Them" : "Me"}: ${h.src}`).join("\n");
+  const system = `You are a live interpreter in a spoken conversation. Translate the user's utterance from ${LANG_NAME[from]} to ${LANG_NAME[to]}.
+Rules: output ONLY the translation, nothing else. Keep it natural and conversational, as a native speaker would say it aloud. Fix obvious speech-recognition errors using context. Keep names as-is. If the utterance is a filler like "um" or empty, output it briefly translated.${to === "ko-KR" ? " Use polite 존댓말 (해요체)." : ""}`;
+  const user = (ctx ? `Recent conversation for context:\n${ctx}\n\n` : "") + `Utterance to translate:\n${text}`;
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{
+      "content-type":"application/json",
+      "x-api-key": apiKey,
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body: JSON.stringify({ model: MODEL, max_tokens: 400, system, messages:[{role:"user", content:user}] })
+  });
+  if(!res.ok){
+    let msg = res.status + "";
+    try{ const j = await res.json(); msg = j.error?.message || msg; }catch(e){}
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  return (data.content || []).map(c => c.text || "").join("").trim();
+}
+
+/* ---------- Speech output (goes to AirPods when connected) ---------- */
+let voices = [];
+function loadVoices(){
+  voices = speechSynthesis.getVoices();
+  fillVoiceSelect($("#koVoice"), "ko", koVoiceName);
+  fillVoiceSelect($("#tVoice"), target.slice(0,2), tVoiceName);
+}
+function fillVoiceSelect(sel, prefix, chosen){
+  const list = voices.filter(v => v.lang.toLowerCase().startsWith(prefix));
+  // prefer enhanced/premium voices first
+  list.sort((a,b) => score(b) - score(a));
+  sel.innerHTML = "";
+  if(!list.length){ sel.innerHTML = '<option value="">기본</option>'; return; }
+  list.forEach(v => { const o = document.createElement("option"); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; sel.appendChild(o); });
+  if(chosen && list.some(v => v.name === chosen)) sel.value = chosen;
+}
+function score(v){ const n = v.name.toLowerCase(); return (n.includes("premium")?3:0) + (n.includes("enhanced")||n.includes("향상")?2:0) + (v.localService?1:0); }
+function pickVoice(lang){
+  const name = lang === "ko-KR" ? koVoiceName : tVoiceName;
+  const prefix = lang.slice(0,2);
+  const list = voices.filter(v => v.lang.toLowerCase().startsWith(prefix)).sort((a,b)=>score(b)-score(a));
+  return list.find(v => v.name === name) || list[0] || null;
+}
+if("speechSynthesis" in window){ loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+
+let unlocked = false;
+function unlockSpeech(){
+  if(unlocked || !("speechSynthesis" in window)) return;
+  const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); unlocked = true;
+}
+
+function speak(text, lang){
+  return new Promise(resolve => {
+    if(!("speechSynthesis" in window) || !text){ resolve(); return; }
+    pauseForSpeech();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang; u.rate = rate;
+    const v = pickVoice(lang); if(v) u.voice = v;
+    let done = false;
+    const finish = () => { if(done) return; done = true; setTimeout(() => { resumeAfterSpeech(); resolve(); }, 250); };
+    u.onend = finish; u.onerror = finish;
+    setTimeout(finish, 4000 + text.length * 180); // safety net if onend never fires
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  });
+}
+
+/* ---------- Log ---------- */
+function addMsg(text, who){
+  $("#empty")?.remove();
+  const el = document.createElement("div");
+  el.className = "msg" + (who === "me" ? " me" : "");
+  el.innerHTML = `<div class="who"></div><div class="src"></div><div class="dst pending">번역 중…</div><button>🔊 다시 듣기</button>`;
+  el.querySelector(".who").textContent = who === "me" ? "나" : "상대";
+  el.querySelector(".src").textContent = text;
+  el.querySelector("button").onclick = () => { if(el.dataset.out) speak(el.dataset.out, el.dataset.lang); };
+  $("#log").appendChild(el);
+  $("#log").scrollTop = $("#log").scrollHeight;
+  return el;
+}
+$("#clearBtn").onclick = () => { $("#log").innerHTML = ""; history.length = 0; };
+
+/* ---------- Settings ---------- */
+function openSettings(){
+  $("#apiKey").value = apiKey; $("#rate").value = rate; loadVoices();
+  $("#settings").showModal();
+}
+$("#settingsBtn").onclick = openSettings;
+$("#cancelSet").onclick = () => $("#settings").close();
+$("#saveSet").onclick = () => {
+  apiKey = $("#apiKey").value.trim(); store.set("apiKey", apiKey);
+  rate = parseFloat($("#rate").value); store.set("rate", rate);
+  koVoiceName = $("#koVoice").value; store.set("koVoice", koVoiceName);
+  tVoiceName = $("#tVoice").value; store.set("tVoice_" + target, tVoiceName);
+  $("#settings").close(); setStatus("저장했어요.");
+};
+$("#target").onchange = e => {
+  target = e.target.value; store.set("target", target);
+  tVoiceName = store.get("tVoice_" + target, "");
+  $("#tLabel").textContent = LABEL[target];
+  loadVoices();
+  if(wantListening) startListening(mode);
+};
+
+if(!apiKey) setTimeout(openSettings, 400);
+</script>
+</body>
+</html>
